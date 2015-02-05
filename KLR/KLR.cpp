@@ -1,15 +1,27 @@
 // KLR.cpp : Defines the entry point for the application.
 //
+#pragma comment(lib, "dwmapi.lib") 
 
 #include "stdafx.h"
 #include "KLR.h"
+#include <dwmapi.h> 
+
 
 #define MAX_LOADSTRING 100
+void UpdateState();
 
 // Global Variables:
 HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
+static HWND hList = NULL;						// Main List View Control
+
+/* Temporary Variables Declarations */
+LVCOLUMN LvCol; // Make Coluom struct for ListView
+LVITEM LvItem;  // ListView Item struct
+
+
+
 
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
@@ -18,14 +30,14 @@ LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPTSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
+	_In_opt_ HINSTANCE hPrevInstance,
+	_In_ LPTSTR    lpCmdLine,
+	_In_ int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
-
- 	// TODO: Place code here.
+	
+	// TODO: Place code here.
 	MSG msg;
 	HACCEL hAccelTable;
 
@@ -35,13 +47,13 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	MyRegisterClass(hInstance);
 
 	// Perform application initialization:
-	if (!InitInstance (hInstance, nCmdShow))
+	if (!InitInstance(hInstance, nCmdShow))
 	{
 		return FALSE;
 	}
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_KLR));
-
+	
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
 	{
@@ -52,7 +64,7 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 		}
 	}
 
-	return (int) msg.wParam;
+	return (int)msg.wParam;
 }
 
 
@@ -68,17 +80,17 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 
 	wcex.cbSize = sizeof(WNDCLASSEX);
 
-	wcex.style			= CS_HREDRAW | CS_VREDRAW;
-	wcex.lpfnWndProc	= WndProc;
-	wcex.cbClsExtra		= 0;
-	wcex.cbWndExtra		= 0;
-	wcex.hInstance		= hInstance;
-	wcex.hIcon			= LoadIcon(hInstance, MAKEINTRESOURCE(IDI_KLR));
-	wcex.hCursor		= LoadCursor(NULL, IDC_ARROW);
-	wcex.hbrBackground	= (HBRUSH)(COLOR_WINDOW+1);
-	wcex.lpszMenuName	= MAKEINTRESOURCE(IDC_KLR);
-	wcex.lpszClassName	= szWindowClass;
-	wcex.hIconSm		= LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
+	wcex.style = CS_HREDRAW | CS_VREDRAW;
+	wcex.lpfnWndProc = WndProc;
+	wcex.cbClsExtra = 0;
+	wcex.cbWndExtra = 0;
+	wcex.hInstance = hInstance;
+	wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_KLR));
+	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+	wcex.lpszMenuName = 0;// MAKEINTRESOURCE(IDC_KLR);
+	wcex.lpszClassName = szWindowClass;
+	wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
 
 	return RegisterClassEx(&wcex);
 }
@@ -95,29 +107,46 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   HWND hWnd;
+	HWND hWnd;
 
-   hInst = hInstance; // Store instance handle in our global variable
+	hInst = hInstance; // Store instance handle in our global variable
 
-   hWnd = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
-   char tmp[8];
-   HKL buff[32];
+	hWnd = CreateWindow(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, 0, 320, 640, NULL, NULL, hInstance, NULL);
+	//char tmp[8];
+	//HKL buff[32];
+	// GetKeyboardLayoutList(8, &buff[0]);
+	// UnloadKeyboardLayout(buff[3]);
 
-   GetKeyboardLayoutList(8, &buff[0]);
+	INITCOMMONCONTROLSEX icex;           // Structure for control initialization.
+	icex.dwICC = ICC_LISTVIEW_CLASSES;
+	InitCommonControlsEx(&icex);
 
+	RECT rcClient;                       // The parent window's client area.
 
-   UnloadKeyboardLayout(buff[3]);
+	GetClientRect(hWnd, &rcClient);
 
-   if (!hWnd)
-   {
-      return FALSE;
-   }
+	// Create the list-view window in report view with label editing enabled.
+	hList = CreateWindow(WC_LISTVIEW,
+		L"",
+		WS_CHILD | LVS_REPORT | LVS_EDITLABELS,
+		0, 0,
+		rcClient.right - rcClient.left,
+		rcClient.bottom - rcClient.top,
+		hWnd,
+		(HMENU)NULL,
+		hInstance,
+		NULL);
 
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
+	if (!hWnd)
+	{
+		return FALSE;
+	}
 
-   return TRUE;
+	ShowWindow(hWnd, nCmdShow);
+	UpdateWindow(hWnd);
+
+	return TRUE;
 }
 
 //
@@ -138,8 +167,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	switch (message)
 	{
+	case WM_CREATE:
+	{
+		MARGINS margins = { -1, -1, -1, -1 };
+		HRESULT hr = DwmExtendFrameIntoClientArea(hWnd, &margins);
+		UINT WINAPI SetTimer(HWND hwnd, UINT idTimer, UINT uTimeout, TIMERPROC tmprc);
+		int nTimerID = SetTimer(hWnd, 123456 /*!TODO*/, 1000 /*!TODO*/, NULL);
+		break;
+	}
+	case WM_TIMER:
+
+		if (wParam == 123456){
+			UpdateState();
+		}
+		break;
 	case WM_COMMAND:
-		wmId    = LOWORD(wParam);
+		wmId = LOWORD(wParam);
 		wmEvent = HIWORD(wParam);
 		// Parse the menu selections:
 		switch (wmId)
@@ -156,6 +199,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 	case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
+		/*
+		Graphics g(hdc);
+		Rect paintRect(0, 0, rc.right, rc.bottom);
+		// Создаем временный буфер
+		Bitmap backBuffer(rc.right, rc.bottom, &g);
+		Graphics temp(&backBuffer);
+		// Рисуем в буфер
+		PaintBackground(temp, paintRect);
+		PaintFlower(temp, paintRect);
+		PaintBatterfly(temp, paintRect);
+		// Переносим на экран
+		g.DrawImage(&backBuffer, 0, 0, 0, 0,
+		rc.right, rc.bottom, UnitPixel);*/
+
+		//DrawThemeTextEx(m_hTheme, dcMem, 0, 0, CT2CW(szTime), -1, uFormat, rcText2, &dto);
+
+
 		// TODO: Add any drawing code here...
 		EndPaint(hWnd, &ps);
 		break;
@@ -186,4 +246,10 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 	}
 	return (INT_PTR)FALSE;
+}
+
+void UpdateState()
+{
+	HKL buff[32];
+	GetKeyboardLayoutList(8, &buff[0]);
 }
