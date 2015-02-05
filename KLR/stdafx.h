@@ -20,6 +20,10 @@
 #include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
-#include <CommCtrl.h>
 
 // TODO: reference additional headers your program requires here
+#include <CommCtrl.h>
+#include <iterator>
+#include <vector>
+#include <string>
+#include <sstream>

@@ -8,7 +8,13 @@
 
 
 #define MAX_LOADSTRING 100
+#define REGPATH_KEYBOARD_LAYOUT_NAME /*HKEY_LOCAL_MACHINE*/L"System\\CurrentControlSet\\Control\\keyboard layouts\\"
+#define REGVAL_KEYBOARD_LAYOUT_NAME L"Layout Text"
+
 void UpdateState();
+BOOL InsertListViewItems(HWND hWndListView, int cItems);
+BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS);
+BOOL InsertListViewItems(HWND hWndListView, int nIcon, LPTSTR pszText);
 
 // Global Variables:
 HINSTANCE hInst;								// current instance
@@ -17,9 +23,17 @@ TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
 static HWND hList = NULL;						// Main List View Control
 
 /* Temporary Variables Declarations */
-LVCOLUMN LvCol; // Make Coluom struct for ListView
+LVCOLUMN LvCol; // Make Column struct for ListView
 LVITEM LvItem;  // ListView Item struct
 
+std::vector<HKL> vLanguageList(10);
+
+struct KeyboardLayout{
+	HKL handle;
+	std::wstring name;
+};
+
+std::vector<KeyboardLayout> klList(10);
 
 
 
@@ -120,7 +134,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 	INITCOMMONCONTROLSEX icex;           // Structure for control initialization.
 	icex.dwICC = ICC_LISTVIEW_CLASSES;
-	InitCommonControlsEx(&icex);
+	icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+	BOOL bRet = InitCommonControlsEx(&icex);
 
 	RECT rcClient;                       // The parent window's client area.
 
@@ -134,7 +149,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 		rcClient.right - rcClient.left,
 		rcClient.bottom - rcClient.top,
 		hWnd,
-		(HMENU)NULL,
+		NULL,
 		hInstance,
 		NULL);
 
@@ -172,6 +187,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		MARGINS margins = { -1, -1, -1, -1 };
 		HRESULT hr = DwmExtendFrameIntoClientArea(hWnd, &margins);
 		UINT WINAPI SetTimer(HWND hwnd, UINT idTimer, UINT uTimeout, TIMERPROC tmprc);
+		
 		int nTimerID = SetTimer(hWnd, 123456 /*!TODO*/, 1000 /*!TODO*/, NULL);
 		break;
 	}
@@ -248,8 +264,152 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 	return (INT_PTR)FALSE;
 }
 
-void UpdateState()
+
+
+std::wstring HexToString(int data){
+	std::wstringstream ws;
+	ws << std::hex << data;
+	return ws.str();
+}
+
+std::wstring HexToString(int data, unsigned int size){
+	std::wstring result = HexToString(data);
+	if (result.length() <= size) {
+		for (int i = size - result.length(); i > 0; --i)
+			result = L'0' + result;
+	}
+	else {
+		result.erase(size); // WARNING: Not tested
+	}
+	return result;
+}
+
+std::wstring HKL2KLName(HKL _in){
+	std::wstring result = L"Unknown";
+	std::wstring wsPath = REGPATH_KEYBOARD_LAYOUT_NAME;
+	
+	/* TODO: REWRITE THIS UGLY CODE ^_^ */
+	std::wstring wsKLName = HexToString((DWORD)_in, 8);
+	if ((wsKLName.c_str()[0] == wsKLName.c_str()[4]) &&
+		(wsKLName.c_str()[1] == wsKLName.c_str()[5]) &&
+		(wsKLName.c_str()[2] == wsKLName.c_str()[6]) &&
+		(wsKLName.c_str()[3] == wsKLName.c_str()[7]))
+		wsPath += L"0000" + wsKLName.erase(4); // Maybe wrong, but i don't find any other solution
+	else
+		wsPath += wsKLName;
+
+	HKEY hKey;
+	LONG lRes = RegOpenKeyEx(HKEY_LOCAL_MACHINE, wsPath.c_str(), 0, KEY_READ, &hKey);
+	if (lRes != 0) return result;
+
+	DWORD pType = 0;
+	BYTE pData = 0;
+	DWORD pcbData = 0;
+	lRes = RegQueryValueEx(hKey, REGVAL_KEYBOARD_LAYOUT_NAME, 0, &pType, 0, &pcbData);
+	BYTE *bData = new BYTE[pcbData];
+	lRes = RegQueryValueEx(hKey, REGVAL_KEYBOARD_LAYOUT_NAME, 0, &pType, bData, &pcbData); // Read Keyboard Layout name from reg
+	if (lRes != 0)	return result;
+
+	result.clear();
+	for (int i = 0; i < pcbData; i+=2 ) result += bData[i];
+
+	return result;
+}
+
+void UpdateListView(){
+	for (auto &klItem : klList){
+		klItem.name;
+
+		InitListViewColumns(hList, 1);
+		InsertListViewItems(hList, 0, &klItem.name[0]);
+	}
+}
+
+void UpdateState(){
+	/* Get HKL List */
+	int nListCount = GetKeyboardLayoutList(0, NULL);
+	if (!nListCount) return;
+	HKL *varbuff = new HKL[nListCount];
+	if (!varbuff) return;
+	GetKeyboardLayoutList(nListCount, varbuff);
+
+	klList.clear();
+	KeyboardLayout klItem;
+	for (int i = 0; i < nListCount; ++i){
+		klItem.handle = varbuff[i];
+		klItem.name = HKL2KLName(klItem.handle);
+		klList.insert(klList.end(), klItem);
+	}
+	delete[] varbuff;	
+	
+	UpdateListView();
+}
+
+BOOL InsertListViewItems(HWND hWndListView, int cItems)
 {
-	HKL buff[32];
-	GetKeyboardLayoutList(8, &buff[0]);
+	// Initialize LVITEM members that are common to all items.
+	LVITEM lvI;
+	lvI.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_STATE;
+	lvI.iSubItem = 0;
+	lvI.state = 0;
+	lvI.stateMask = 0;
+	lvI.pszText = LPSTR_TEXTCALLBACK; // sends an LVN_GETDISPINFO message
+	// Initialize LVITEM members that are different for each item. 
+	for (int index = 0; index < cItems; index++)
+	{
+		lvI.iItem = index;
+		lvI.iImage = index;
+
+		// Insert items into the list.
+		if (ListView_InsertItem(hWndListView, &lvI) == -1)
+			return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL InsertListViewItems(HWND hWndListView, int nIcon, LPTSTR pszText)
+{
+	LVITEM lvI;
+	lvI.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_STATE;
+	lvI.iSubItem = 0;
+	lvI.state = 0;
+	lvI.stateMask = 0;
+	lvI.pszText = pszText;//LPSTR_TEXTCALLBACK;
+	lvI.iItem = ListView_GetItemCount(hWndListView);
+	lvI.iImage = nIcon;
+	if (ListView_InsertItem(hWndListView, &lvI) == -1)
+		return FALSE;
+	return TRUE;
+}
+
+BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS)
+{
+	TCHAR szText[256] = L"Header";     // temporary buffer 
+	LVCOLUMN lvc;
+	int iCol;
+
+	// Initialize the LVCOLUMN structure.
+	// The mask specifies that the format, width, text, and subitem members
+	// of the structure are valid. 
+	lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+	// Add the columns.
+	for (iCol = 0; iCol < C_COLUMNS; iCol++)
+	{
+		lvc.iSubItem = iCol;
+		lvc.pszText = szText;
+		lvc.cx = 100;     // width of column in pixels
+
+		if (iCol < 2)
+			lvc.fmt = LVCFMT_LEFT;  // left-aligned column
+		else
+			lvc.fmt = LVCFMT_RIGHT; // right-aligned column                                 
+
+		// Load the names of the column headings from the string resources.
+		//LoadString(hInst, IDS_FIRSTCOLUMN + iCol, szText, sizeof(szText) / sizeof(szText[0]));
+
+		// Insert the columns into the list view.
+		if (ListView_InsertColumn(hWndListView, iCol, &lvc) == -1)
+			return FALSE;
+	}
+	return TRUE;
 }
