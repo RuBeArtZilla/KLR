@@ -25,6 +25,8 @@ static HWND hList = NULL;						// Main List View Control
 /* Temporary Variables Declarations */
 LVCOLUMN LvCol; // Make Column struct for ListView
 LVITEM LvItem;  // ListView Item struct
+static bool bUpdateListView = true;
+
 
 std::vector<HKL> vLanguageList(10);
 
@@ -34,8 +36,10 @@ struct KeyboardLayout{
 };
 
 std::vector<KeyboardLayout> klList(10);
-
-
+std::vector<KeyboardLayout> klListOld(10);
+inline bool operator==(const KeyboardLayout& lhs, const KeyboardLayout& rhs){
+	return lhs.handle == rhs.handle;
+}
 
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
@@ -137,21 +141,21 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
 	BOOL bRet = InitCommonControlsEx(&icex);
 
-	RECT rcClient;                       // The parent window's client area.
-
+	RECT rcClient;
 	GetClientRect(hWnd, &rcClient);
-
-	// Create the list-view window in report view with label editing enabled.
-	hList = CreateWindow(WC_LISTVIEW,
+	hList = CreateWindowEx(0L,
+		WC_LISTVIEW,
 		L"",
-		WS_CHILD | LVS_REPORT | LVS_EDITLABELS,
+		WS_VISIBLE | WS_CHILD | LVS_LIST | LVS_EDITLABELS,
 		0, 0,
 		rcClient.right - rcClient.left,
 		rcClient.bottom - rcClient.top,
 		hWnd,
 		NULL,
-		hInstance,
+		hInst,
 		NULL);
+
+	ListView_SetBkColor(hList, CLR_NONE);
 
 	if (!hWnd)
 	{
@@ -187,8 +191,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		MARGINS margins = { -1, -1, -1, -1 };
 		HRESULT hr = DwmExtendFrameIntoClientArea(hWnd, &margins);
 		UINT WINAPI SetTimer(HWND hwnd, UINT idTimer, UINT uTimeout, TIMERPROC tmprc);
-		
 		int nTimerID = SetTimer(hWnd, 123456 /*!TODO*/, 1000 /*!TODO*/, NULL);
+		
 		break;
 	}
 	case WM_TIMER:
@@ -317,15 +321,17 @@ std::wstring HKL2KLName(HKL _in){
 }
 
 void UpdateListView(){
+	InitListViewColumns(hList, 1);
 	for (auto &klItem : klList){
-		klItem.name;
-
-		InitListViewColumns(hList, 1);
 		InsertListViewItems(hList, 0, &klItem.name[0]);
+		klItem.name;
 	}
 }
 
 void UpdateState(){
+
+	klListOld = klList;
+
 	/* Get HKL List */
 	int nListCount = GetKeyboardLayoutList(0, NULL);
 	if (!nListCount) return;
@@ -341,8 +347,8 @@ void UpdateState(){
 		klList.insert(klList.end(), klItem);
 	}
 	delete[] varbuff;	
-	
-	UpdateListView();
+	if (klListOld != klList)
+		UpdateListView();
 }
 
 BOOL InsertListViewItems(HWND hWndListView, int cItems)
@@ -384,7 +390,7 @@ BOOL InsertListViewItems(HWND hWndListView, int nIcon, LPTSTR pszText)
 
 BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS)
 {
-	TCHAR szText[256] = L"Header";     // temporary buffer 
+	TCHAR szText[256] = L"header";     // temporary buffer 
 	LVCOLUMN lvc;
 	int iCol;
 
