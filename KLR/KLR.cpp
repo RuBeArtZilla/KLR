@@ -6,15 +6,19 @@
 #include "KLR.h"
 #include <dwmapi.h> 
 
-
+#define KeyboardLayoutList std::vector<KeyboardLayout>
 #define MAX_LOADSTRING 100
 #define REGPATH_KEYBOARD_LAYOUT_NAME /*HKEY_LOCAL_MACHINE*/L"System\\CurrentControlSet\\Control\\keyboard layouts\\"
 #define REGVAL_KEYBOARD_LAYOUT_NAME L"Layout Text"
+#define SETTINGS_INI_FILE_NAME L"config.ini"
+#define DEFAULT_DELIMITER L" "
 
 void UpdateState();
 BOOL InsertListViewItems(HWND hWndListView, int cItems);
 BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS);
 BOOL InsertListViewItems(HWND hWndListView, int nIcon, LPTSTR pszText);
+std::wstring IniRead(std::wstring filename, std::wstring section, std::wstring key);
+bool IniWrite(std::wstring filename, std::wstring section, std::wstring key, std::wstring data);
 
 // Global Variables:
 HINSTANCE hInst;								// current instance
@@ -27,25 +31,46 @@ LVCOLUMN LvCol; // Make Column struct for ListView
 LVITEM LvItem;  // ListView Item struct
 static bool bUpdateListView = true;
 
-
-std::vector<HKL> vLanguageList(10);
-
 struct KeyboardLayout{
 	HKL handle;
 	std::wstring name;
 };
 
-std::vector<KeyboardLayout> klList(10);
-std::vector<KeyboardLayout> klListOld(10);
+KeyboardLayoutList klList(10);
+KeyboardLayoutList klListOld(10);
+
+bool SaveKeyboardlayoutList(KeyboardLayoutList save);
+KeyboardLayoutList LoadKeyboardlayoutList();
+
+
 inline bool operator==(const KeyboardLayout& lhs, const KeyboardLayout& rhs){
 	return lhs.handle == rhs.handle;
 }
+
 
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
 BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
+
+//TODO: Move this to another place
+template<typename T>
+std::vector<T>
+split(const T & str, const T & delimiters) {
+	std::vector<T> v;
+	T::size_type start = 0;
+	auto pos = str.find_first_of(delimiters, start);
+	while (pos != T::npos) {
+		if (pos != start) // ignore empty tokens
+			v.emplace_back(str, start, pos - start);
+		start = pos + 1;
+		pos = str.find_first_of(delimiters, start);
+	}
+	if (start < str.length()) // ignore trailing delimiter
+		v.emplace_back(str, start, str.length() - start); // add what's left of the string
+	return v;
+}
 
 int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -315,7 +340,7 @@ std::wstring HKL2KLName(HKL _in){
 	if (lRes != 0)	return result;
 
 	result.clear();
-	for (int i = 0; i < pcbData; i+=2 ) result += bData[i];
+	for (unsigned int i = 0; i < pcbData; i+=2 ) result += bData[i];
 
 	return result;
 }
@@ -326,6 +351,9 @@ void UpdateListView(){
 		InsertListViewItems(hList, 0, &klItem.name[0]);
 		klItem.name;
 	}
+
+	SaveKeyboardlayoutList(klList);
+	LoadKeyboardlayoutList();
 }
 
 void UpdateState(){
@@ -353,20 +381,18 @@ void UpdateState(){
 
 BOOL InsertListViewItems(HWND hWndListView, int cItems)
 {
-	// Initialize LVITEM members that are common to all items.
 	LVITEM lvI;
 	lvI.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_STATE;
 	lvI.iSubItem = 0;
 	lvI.state = 0;
 	lvI.stateMask = 0;
 	lvI.pszText = LPSTR_TEXTCALLBACK; // sends an LVN_GETDISPINFO message
-	// Initialize LVITEM members that are different for each item. 
+	
 	for (int index = 0; index < cItems; index++)
 	{
 		lvI.iItem = index;
 		lvI.iImage = index;
 
-		// Insert items into the list.
 		if (ListView_InsertItem(hWndListView, &lvI) == -1)
 			return FALSE;
 	}
@@ -394,11 +420,8 @@ BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS)
 	LVCOLUMN lvc;
 	int iCol;
 
-	// Initialize the LVCOLUMN structure.
-	// The mask specifies that the format, width, text, and subitem members
-	// of the structure are valid. 
 	lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
-	// Add the columns.
+
 	for (iCol = 0; iCol < C_COLUMNS; iCol++)
 	{
 		lvc.iSubItem = iCol;
@@ -410,12 +433,51 @@ BOOL InitListViewColumns(HWND hWndListView, int C_COLUMNS)
 		else
 			lvc.fmt = LVCFMT_RIGHT; // right-aligned column                                 
 
-		// Load the names of the column headings from the string resources.
-		//LoadString(hInst, IDS_FIRSTCOLUMN + iCol, szText, sizeof(szText) / sizeof(szText[0]));
-
-		// Insert the columns into the list view.
 		if (ListView_InsertColumn(hWndListView, iCol, &lvc) == -1)
 			return FALSE;
 	}
 	return TRUE;
 }
+
+
+std::wstring IniRead(std::wstring filename, std::wstring section, std::wstring key){
+	wchar_t *out = new wchar_t[512];
+	GetPrivateProfileString(section.c_str(), key.c_str(), NULL, out, 512, filename.c_str());
+	std::wstring result(out);
+	delete out;
+	return result;
+}
+
+bool IniWrite(std::wstring filename, std::wstring section, std::wstring key, std::wstring data){
+	return WritePrivateProfileString(section.c_str(), key.c_str(), data.c_str(), filename.c_str());
+}
+
+bool SaveKeyboardlayoutList(KeyboardLayoutList save){
+	std::wstring wsData;
+	for (auto &klItem : save){
+		wsData += DEFAULT_DELIMITER + std::to_wstring((unsigned int)klItem.handle);
+	}
+
+	return IniWrite(SETTINGS_INI_FILE_NAME, L"OPTIONS", L"KBLList", wsData);
+};
+
+KeyboardLayoutList LoadKeyboardlayoutList(){
+	KeyboardLayoutList result(10);
+	std::wstring wsData;
+	wsData = IniRead(SETTINGS_INI_FILE_NAME, L"OPTIONS", L"KBLList");
+	
+	std::vector<std::wstring> v = split<std::wstring>(wsData, DEFAULT_DELIMITER);
+
+	result.clear();
+	for (std::wstring &vItem : v){
+		KeyboardLayout klItem;
+		klItem.handle = (HKL)_wtoi64(vItem.c_str());
+		klItem.name = HKL2KLName(klItem.handle);
+		result.insert(result.end(), klItem);
+	}
+	
+	return result;
+};
+
+
+
